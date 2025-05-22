@@ -138,6 +138,7 @@ public sealed class IisTaskHandle : IDisposable
 				}
 
 				// Create applications
+				var applicationIndex = 0;
 				foreach ( var app in config.Applications.OrderBy( x => string.IsNullOrEmpty( x.Alias ) ? 0 : 1 ) )
 				{
 					var application = FindApplicationByPath( website, $"/{app.Alias}" );
@@ -150,7 +151,7 @@ public sealed class IisTaskHandle : IDisposable
 						if ( app.ApplicationPool is not null )
 						{
 							// Create AppPool
-							var applicationAppPoolName = BuildAppPoolName( _taskConfig, app );
+							var applicationAppPoolName = BuildAppPoolOrWebsiteName( _taskConfig, applicationIndex );
 
 							var applicationAppPool = FindApplicationPool( handle.ServerManager, applicationAppPoolName );
 							if ( applicationAppPool is null )
@@ -162,6 +163,8 @@ public sealed class IisTaskHandle : IDisposable
 						}
 						CreateApplication( website, appPool, _taskConfig, app, _owner );
 					}
+
+					applicationIndex++;
 				}
 
 				_state.ApplicationAliases = config.Applications.Select( x => x.Alias ).ToList();
@@ -465,9 +468,16 @@ public sealed class IisTaskHandle : IDisposable
 
 	#region IIS Helper Methods
 
-	private static string BuildAppPoolOrWebsiteName ( TaskConfig taskConfig )
+	private static string BuildAppPoolOrWebsiteName ( TaskConfig taskConfig, int? sequence = null )
 	{
-		var name = SanitizeName( $"{AppPoolOrWebsiteNamePrefix}{taskConfig.AllocId}-{taskConfig.Name}" );
+		var name = $"{AppPoolOrWebsiteNamePrefix}{taskConfig.AllocId}-{taskConfig.Name}";
+
+		if ( sequence is not null )
+		{
+			name += $"-{sequence}";
+		}
+
+		name = SanitizeName( name );
 
 		return name.Length <= 64 ? name : $"{AppPoolOrWebsiteNamePrefix}{taskConfig.AllocId}";
 	}
@@ -492,8 +502,8 @@ public sealed class IisTaskHandle : IDisposable
 		return sb.ToString();
 	}
 
-	private static string BuildAppPoolName ( TaskConfig taskConfig, DriverTaskConfigApplication appConfig ) =>
-		SanitizeName($"{AppPoolOrWebsiteNamePrefix}{taskConfig.AllocId}-{appConfig.Path.GetHashCode()}");
+	//private static string BuildAppPoolName ( TaskConfig taskConfig, DriverTaskConfigApplication appConfig ) =>
+	//	SanitizeName($"{AppPoolOrWebsiteNamePrefix}{taskConfig.AllocId}-{appConfig.Path.GetHashCode()}");
 
 	private static ApplicationPool GetApplicationPool ( ServerManager serverManager, string name )
 		=> FindApplicationPool( serverManager, name ) ?? throw new KeyNotFoundException( $"No AppPool with name {name} found." );
