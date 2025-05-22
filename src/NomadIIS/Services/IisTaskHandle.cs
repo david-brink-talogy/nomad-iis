@@ -148,7 +148,8 @@ public sealed class IisTaskHandle : IDisposable
 
 					if ( application is null )
 					{
-						if ( app.ApplicationPool is not null )
+						var configApplicationAppPool = app.ApplicationPools.FirstOrDefault();
+						if ( configApplicationAppPool is not null )
 						{
 							// Create AppPool
 							var applicationAppPoolName = BuildAppPoolOrWebsiteName( _taskConfig, applicationIndex );
@@ -158,7 +159,7 @@ public sealed class IisTaskHandle : IDisposable
 							{
 								_logger.LogInformation( $"Task {task.Id}: Creating AppPool with name {applicationAppPoolName}..." );
 
-								appPool = CreateApplicationPool( handle.ServerManager, applicationAppPoolName, app.ApplicationPool);
+								appPool = CreateApplicationPool( handle.ServerManager, applicationAppPoolName, configApplicationAppPool, _state.UdpLoggerPort, _owner.UdpLoggerPort );
 							}
 						}
 						CreateApplication( website, appPool, _taskConfig, app, _owner );
@@ -509,80 +510,64 @@ public sealed class IisTaskHandle : IDisposable
 		=> FindApplicationPool( serverManager, name ) ?? throw new KeyNotFoundException( $"No AppPool with name {name} found." );
 	private static ApplicationPool? FindApplicationPool ( ServerManager serverManager, string name )
 		=> serverManager.ApplicationPools.FirstOrDefault( x => x.Name == name );
+
 	private static ApplicationPool CreateApplicationPool ( ServerManager serverManager, string name, TaskConfig taskConfig, DriverTaskConfig config, int? udpLocalPort, int? udpRemotePort )
 	{
-		var appPool = serverManager.ApplicationPools.Add( name );
-		appPool.AutoStart = true;
-
-		if ( config.ManagedPipelineMode is not null )
-			appPool.ManagedPipelineMode = config.ManagedPipelineMode.Value;
-
-		if ( !string.IsNullOrWhiteSpace( config.ManagedRuntimeVersion ) )
-		{
-			if ( config.ManagedRuntimeVersion == "None" )
-				appPool.ManagedRuntimeVersion = "";
-			else if ( config.ManagedRuntimeVersion == "v4.0" )
-				appPool.ManagedRuntimeVersion = "v4.0";
-			else if ( config.ManagedRuntimeVersion == "v2.0" )
-				appPool.ManagedRuntimeVersion = "v2.0";
-			else
-				throw new ArgumentException( $"Invalid managed_runtime_version. Must be either v4.0, v2.0 or None." );
-		}
-
-		if ( config.StartMode is not null )
-			appPool.StartMode = config.StartMode.Value;
-
-		if ( config.IdleTimeout is not null )
-			appPool.ProcessModel.IdleTimeout = config.IdleTimeout.Value;
-
-		if ( config.DisabledOverlappedRecycle is not null )
-			appPool.Recycling.DisallowOverlappingRotation = config.DisabledOverlappedRecycle.Value;
-
-		if ( config.Enable32BitAppOnWin64 is not null )
-			appPool.Enable32BitAppOnWin64 = config.Enable32BitAppOnWin64.Value;
-
-		if ( config.PeriodicRestart is not null )
-			appPool.Recycling.PeriodicRestart.Time = config.PeriodicRestart.Value;
-
-		if ( config.ServiceUnavailableResponse is not null )
-			appPool.Failure.LoadBalancerCapabilities = config.ServiceUnavailableResponse.Value;
-
-		if ( config.QueueLength is not null )
-			appPool.QueueLength = config.QueueLength.Value;
-
-		if ( config.StartTimeLimit is not null )
-			appPool.ProcessModel.StartupTimeLimit = config.StartTimeLimit.Value;
-		if ( config.ShutdownTimeLimit is not null )
-			appPool.ProcessModel.ShutdownTimeLimit = config.ShutdownTimeLimit.Value;
+		var appPool = CreateApplicationPool( serverManager, name, config );
 
 		var envVarsCollection = appPool.GetCollection( "environmentVariables" );
 
 		foreach ( var env in GetTaskConfigEnvironmentVariables( taskConfig ) )
 			AddEnvironmentVariable( envVarsCollection, env.Key, env.Value );
 
-		if ( udpLocalPort is not null && udpRemotePort is not null )
-		{
-			AddEnvironmentVariable( envVarsCollection, "NOMAD_STDOUT_UDP_REMOTE_PORT", udpRemotePort.Value.ToString() );
-			AddEnvironmentVariable( envVarsCollection, "NOMAD_STDOUT_UDP_LOCAL_PORT", udpLocalPort.Value.ToString() );
-		}
+		AddUdpLoggingEnvironmentVariables( envVarsCollection, udpLocalPort, udpRemotePort );
 
 		return appPool;
+	}
 
-		void AddEnvironmentVariable ( ConfigurationElementCollection envVarsCollection, string key, string value )
+	private static ApplicationPool CreateApplicationPool ( ServerManager serverManager, string name, DriverTaskConfigApplicationPool config, int? udpLocalPort, int? udpRemotePort )
+	{
+		var appPool = CreateApplicationPool( serverManager, name, config );
+
+		var envVarsCollection = appPool.GetCollection( "environmentVariables" );
+
+		if ( config.EnvironmentVariables is not null )
 		{
-			if ( !string.IsNullOrEmpty( key ) && !string.IsNullOrEmpty( value ) )
-			{
-				var envVarElement = envVarsCollection.CreateElement( "add" );
+			foreach ( var env in config.EnvironmentVariables )
+				AddEnvironmentVariable( envVarsCollection, env.Key, env.Value );
+		}
 
-				envVarElement["name"] = key;
-				envVarElement["value"] = value;
+		AddUdpLoggingEnvironmentVariables( envVarsCollection, udpLocalPort, udpRemotePort );
 
-				envVarsCollection.Add( envVarElement );
-			}
+		return appPool;
+	}
+
+	private static void AddUdpLoggingEnvironmentVariables( ConfigurationElementCollection envVarsCollection, int? udpLocalPort, int? udpRemotePort )
+	{
+		if ( udpLocalPort is null || udpRemotePort is null )
+		{
+			return;
+		}
+
+		AddEnvironmentVariable( envVarsCollection, "NOMAD_STDOUT_UDP_REMOTE_PORT", udpRemotePort.Value.ToString() );
+		AddEnvironmentVariable( envVarsCollection, "NOMAD_STDOUT_UDP_LOCAL_PORT", udpLocalPort.Value.ToString() );
+	}
+
+	private static void AddEnvironmentVariable ( ConfigurationElementCollection envVarsCollection, string key, string value )
+	{
+		if ( !string.IsNullOrEmpty( key ) && !string.IsNullOrEmpty( value ) )
+		{
+			var envVarElement = envVarsCollection.CreateElement( "add" );
+
+			envVarElement["name"] = key;
+			envVarElement["value"] = value;
+
+			envVarsCollection.Add( envVarElement );
 		}
 	}
 
-	private static ApplicationPool CreateApplicationPool ( ServerManager serverManager, string name, DriverTaskConfigApplicationPool config )
+	private static ApplicationPool CreateApplicationPool(ServerManager serverManager, string name,
+		DriverTaskConfigApplicationPoolBase config)
 	{
 		var appPool = serverManager.ApplicationPools.Add( name );
 		appPool.AutoStart = true;
@@ -627,7 +612,6 @@ public sealed class IisTaskHandle : IDisposable
 			appPool.ProcessModel.StartupTimeLimit = config.StartTimeLimit.Value;
 		if ( config.ShutdownTimeLimit is not null )
 			appPool.ProcessModel.ShutdownTimeLimit = config.ShutdownTimeLimit.Value;
-
 		return appPool;
 	}
 
