@@ -146,7 +146,22 @@ public sealed class IisTaskHandle : IDisposable
 						throw new InvalidOperationException( $"An application with alias {app.Alias} already exists in website {website.Name}." );
 
 					if ( application is null )
+					{
+						if ( app.ApplicationPool is not null )
+						{
+							// Create AppPool
+							var applicationAppPoolName = BuildAppPoolName( _taskConfig, app );
+
+							var applicationAppPool = FindApplicationPool( handle.ServerManager, applicationAppPoolName );
+							if ( applicationAppPool is null )
+							{
+								_logger.LogInformation( $"Task {task.Id}: Creating AppPool with name {applicationAppPoolName}..." );
+
+								appPool = CreateApplicationPool( handle.ServerManager, applicationAppPoolName, app.ApplicationPool);
+							}
+						}
 						CreateApplication( website, appPool, _taskConfig, app, _owner );
+					}
 				}
 
 				_state.ApplicationAliases = config.Applications.Select( x => x.Alias ).ToList();
@@ -452,8 +467,14 @@ public sealed class IisTaskHandle : IDisposable
 
 	private static string BuildAppPoolOrWebsiteName ( TaskConfig taskConfig )
 	{
-		var rawName = $"{AppPoolOrWebsiteNamePrefix}{taskConfig.AllocId}-{taskConfig.Name}";
+		var name = SanitizeName( $"{AppPoolOrWebsiteNamePrefix}{taskConfig.AllocId}-{taskConfig.Name}" );
 
+		return name.Length <= 64 ? name : $"{AppPoolOrWebsiteNamePrefix}{taskConfig.AllocId}";
+	}
+		
+
+	private static string SanitizeName(string rawName)
+	{
 		var invalidChars = ApplicationPoolCollection.InvalidApplicationPoolNameCharacters()
 			.Union( SiteCollection.InvalidSiteNameCharacters() )
 			.ToArray();
@@ -468,14 +489,11 @@ public sealed class IisTaskHandle : IDisposable
 				sb.Append( c );
 		}
 
-		var finalName = sb.ToString();
-
-		// AppPool name limit is 64 characters. Website's doesn't seem to have a limit.
-		if ( finalName.Length > 64 )
-			finalName = $"{AppPoolOrWebsiteNamePrefix}{taskConfig.AllocId}";
-
-		return finalName;
+		return sb.ToString();
 	}
+
+	private static string BuildAppPoolName ( TaskConfig taskConfig, DriverTaskConfigApplication appConfig ) =>
+		SanitizeName($"{AppPoolOrWebsiteNamePrefix}{taskConfig.AllocId}-{appConfig.Path.GetHashCode()}");
 
 	private static ApplicationPool GetApplicationPool ( ServerManager serverManager, string name )
 		=> FindApplicationPool( serverManager, name ) ?? throw new KeyNotFoundException( $"No AppPool with name {name} found." );
@@ -552,6 +570,55 @@ public sealed class IisTaskHandle : IDisposable
 				envVarsCollection.Add( envVarElement );
 			}
 		}
+	}
+
+	private static ApplicationPool CreateApplicationPool ( ServerManager serverManager, string name, DriverTaskConfigApplicationPool config )
+	{
+		var appPool = serverManager.ApplicationPools.Add( name );
+		appPool.AutoStart = true;
+
+		if ( config.ManagedPipelineMode is not null )
+			appPool.ManagedPipelineMode = config.ManagedPipelineMode.Value;
+
+		if ( !string.IsNullOrWhiteSpace( config.ManagedRuntimeVersion ) )
+		{
+			if ( config.ManagedRuntimeVersion == "None" )
+				appPool.ManagedRuntimeVersion = "";
+			else if ( config.ManagedRuntimeVersion == "v4.0" )
+				appPool.ManagedRuntimeVersion = "v4.0";
+			else if ( config.ManagedRuntimeVersion == "v2.0" )
+				appPool.ManagedRuntimeVersion = "v2.0";
+			else
+				throw new ArgumentException( $"Invalid managed_runtime_version. Must be either v4.0, v2.0 or None." );
+		}
+
+		if ( config.StartMode is not null )
+			appPool.StartMode = config.StartMode.Value;
+
+		if ( config.IdleTimeout is not null )
+			appPool.ProcessModel.IdleTimeout = config.IdleTimeout.Value;
+
+		if ( config.DisabledOverlappedRecycle is not null )
+			appPool.Recycling.DisallowOverlappingRotation = config.DisabledOverlappedRecycle.Value;
+
+		if ( config.Enable32BitAppOnWin64 is not null )
+			appPool.Enable32BitAppOnWin64 = config.Enable32BitAppOnWin64.Value;
+
+		if ( config.PeriodicRestart is not null )
+			appPool.Recycling.PeriodicRestart.Time = config.PeriodicRestart.Value;
+
+		if ( config.ServiceUnavailableResponse is not null )
+			appPool.Failure.LoadBalancerCapabilities = config.ServiceUnavailableResponse.Value;
+
+		if ( config.QueueLength is not null )
+			appPool.QueueLength = config.QueueLength.Value;
+
+		if ( config.StartTimeLimit is not null )
+			appPool.ProcessModel.StartupTimeLimit = config.StartTimeLimit.Value;
+		if ( config.ShutdownTimeLimit is not null )
+			appPool.ProcessModel.ShutdownTimeLimit = config.ShutdownTimeLimit.Value;
+
+		return appPool;
 	}
 
 	private static IEnumerable<KeyValuePair<string, string>> GetTaskConfigEnvironmentVariables ( TaskConfig taskConfig )

@@ -71,7 +71,12 @@ public sealed class DriverTaskConfigApplication
 
 	[ConfigurationCollectionField( "virtual_directories", "virtual_directory" )]
 	public DriverTaskConfigVirtualDirectory[]? VirtualDirectories { get; set; }
+
+	[ConfigurationField( "application_pool" )]
+	public DriverTaskConfigApplicationPool? ApplicationPool { get; set; }
 }
+
+
 
 public sealed class DriverTaskConfigVirtualDirectory
 {
@@ -82,6 +87,42 @@ public sealed class DriverTaskConfigVirtualDirectory
 	[Required]
 	[ConfigurationField( "path" )]
 	public string Path { get; set; } = default!;
+}
+
+public sealed class DriverTaskConfigApplicationPool
+{
+	[ConfigurationField( "managed_pipeline_mode" )]
+	public ManagedPipelineMode? ManagedPipelineMode { get; set; }
+
+	[ConfigurationField( "managed_runtime_version" )]
+	public string? ManagedRuntimeVersion { get; set; }
+
+	[ConfigurationField( "start_mode" )]
+	public StartMode? StartMode { get; set; }
+
+	[ConfigurationField( "idle_timeout" )]
+	public TimeSpan? IdleTimeout { get; set; }
+
+	[ConfigurationField( "disable_overlapped_recycle" )]
+	public bool? DisabledOverlappedRecycle { get; set; }
+
+	[ConfigurationField( "periodic_restart" )]
+	public TimeSpan? PeriodicRestart { get; set; }
+
+	[ConfigurationField( "enable_32bit_app_on_win64" )]
+	public bool? Enable32BitAppOnWin64 { get; set; }
+
+	[ConfigurationField( "service_unavailable_response" )]
+	public LoadBalancerCapabilities? ServiceUnavailableResponse { get; set; }
+
+	[ConfigurationField( "queue_length" )]
+	public long? QueueLength { get; set; }
+
+	[ConfigurationField( "start_time_limit" )]
+	public TimeSpan? StartTimeLimit { get; set; }
+
+	[ConfigurationField( "shutdown_time_limit" )]
+	public TimeSpan? ShutdownTimeLimit { get; set; }
 }
 
 public sealed class DriverTaskConfigBinding
