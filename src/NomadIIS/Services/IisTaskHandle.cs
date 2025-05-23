@@ -10,6 +10,7 @@ using Microsoft.Web.Administration;
 using NomadIIS.Services.Configuration;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using System.IO;
 using System.IO.Compression;
 using System.IO.Pipes;
@@ -157,7 +158,6 @@ public sealed class IisTaskHandle : IDisposable
 							await SendTaskEventAsync( $"Preparing to create application pool: {applicationAppPoolName} for sub-application. Index ID: {applicationIndex}." );
 
 							var applicationAppPool = FindApplicationPool( handle.ServerManager, applicationAppPoolName );
-							await SendTaskEventAsync( $"Found application pool for sub-application: {applicationAppPool.Name}" );
 							if ( applicationAppPool is null )
 							{
 								await SendTaskEventAsync( $"Creating application pool for sub-application with {task.Id}: {applicationAppPoolName}" );
@@ -166,6 +166,10 @@ public sealed class IisTaskHandle : IDisposable
 								appPool = CreateApplicationPool( handle.ServerManager, applicationAppPoolName, configApplicationAppPool, _state.UdpLoggerPort, _owner.UdpLoggerPort );
 
 								await SendTaskEventAsync( $"Created application pool for sub-application with {task.Id}: {applicationAppPoolName}" );
+							}
+							else
+							{
+								await SendTaskEventAsync( $"Found application pool for sub-application: {applicationAppPool.Name}" );
 							}
 						}
 						CreateApplication( website, appPool, _taskConfig, app, _owner );
@@ -477,18 +481,24 @@ public sealed class IisTaskHandle : IDisposable
 
 	private static string BuildAppPoolOrWebsiteName ( TaskConfig taskConfig, int? sequence = null )
 	{
-		var name = $"{AppPoolOrWebsiteNamePrefix}{taskConfig.AllocId}-{taskConfig.Name}";
+		var name = SanitizeName( $"{AppPoolOrWebsiteNamePrefix}{taskConfig.AllocId}-{taskConfig.Name}" );
+		var suffix = $"-{sequence}";
 
 		if ( sequence is not null )
 		{
-			name = name.Length <= 64 ? $"{name}-{sequence}" : $"{AppPoolOrWebsiteNamePrefix}{taskConfig.AllocId}-{sequence}";
+			name += suffix;
 		}
 
-		name = SanitizeName( name );
+		if ( name.Length <= 64 )
+		{
+			return name;
+		}
 
-		return name.Length <= 64 ? name : $"{AppPoolOrWebsiteNamePrefix}{taskConfig.AllocId}";
+		return sequence is not null
+			? $"{AppPoolOrWebsiteNamePrefix}{taskConfig.AllocId}"
+			: $"{AppPoolOrWebsiteNamePrefix}{taskConfig.AllocId}{suffix}";
 	}
-		
+
 
 	private static string SanitizeName(string rawName)
 	{
