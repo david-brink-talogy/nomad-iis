@@ -1,28 +1,27 @@
-﻿{
-	"profiles": {
-		"Debug": {
-			"commandName": "Project",
-			"dotnetRunMessages": true,
-			"launchBrowser": false,
-			"environmentVariables": {
-				"ASPNETCORE_ENVIRONMENT": "Development"
-			}
-		},
-		"Nomad (Dev)": {
-			"commandName": "Executable",
-			"executablePath": "$(MSBuildProjectDirectory)\\..\\..\\nomad\\nomad.exe",
-			"commandLineArgs": "agent -dev -config=$(MSBuildProjectDirectory)\\..\\..\\examples\\agent.dev.hcl -plugin-dir=$(MSBuildProjectDirectory)\\bin\\Debug\\net9.0",
-			"environmentVariables": {
-				"ASPNETCORE_ENVIRONMENT": "Development"
-			}
-		},
-		"Nomad": {
-			"commandName": "Executable",
-			"executablePath": "$(MSBuildProjectDirectory)\\..\\..\\nomad\\nomad.exe",
-			"commandLineArgs": "agent -config=$(MSBuildProjectDirectory)\\..\\..\\examples\\agent.hcl -plugin-dir=$(MSBuildProjectDirectory)\\bin\\Debug\\net9.0 -data-dir=$(MSBuildProjectDirectory)\\..\\..\\nomad\\data",
-			"environmentVariables": {
-				"ASPNETCORE_ENVIRONMENT": "Development"
-			}
-		}
-	}
+{
+  "profiles": {
+    "Debug": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "dotnetRunMessages": true
+    },
+    "Nomad (Dev)": {
+      "commandName": "Executable",
+      "executablePath": "$(MSBuildProjectDirectory)\\..\\..\\nomad\\nomad.exe",
+      "commandLineArgs": "agent -dev -config=\"$(MSBuildProjectDirectory)\\..\\..\\examples\\agent.dev.hcl\" -plugin-dir=\"$(MSBuildProjectDirectory)\\bin\\Debug\\net9.0\"",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    },
+    "Nomad": {
+      "commandName": "Executable",
+      "executablePath": "$(MSBuildProjectDirectory)\\..\\..\\nomad\\nomad.exe",
+      "commandLineArgs": "agent -config=$(MSBuildProjectDirectory)\\..\\..\\examples\\agent.hcl -plugin-dir=$(MSBuildProjectDirectory)\\bin\\Debug\\net9.0 -data-dir=$(MSBuildProjectDirectory)\\..\\..\\nomad\\data",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    }
+  }
 }

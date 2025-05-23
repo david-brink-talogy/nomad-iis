@@ -5,46 +5,13 @@ using System.ComponentModel.DataAnnotations;
 
 namespace NomadIIS.Services.Configuration;
 
-public sealed class DriverTaskConfig
+public sealed class DriverTaskConfig : DriverTaskConfigApplicationPoolBase
 {
 	[ConfigurationField( "target_website" )]
 	public string? TargetWebsite { get; set; }
 
 	[ConfigurationCollectionField( "applications", "application", 1 )]
 	public DriverTaskConfigApplication[] Applications { get; set; } = default!;
-
-	[ConfigurationField( "managed_pipeline_mode" )]
-	public Microsoft.Web.Administration.ManagedPipelineMode? ManagedPipelineMode { get; set; }
-
-	[ConfigurationField( "managed_runtime_version" )]
-	public string? ManagedRuntimeVersion { get; set; }
-
-	[ConfigurationField( "start_mode" )]
-	public Microsoft.Web.Administration.StartMode? StartMode { get; set; }
-
-	[ConfigurationField( "idle_timeout" )]
-	public TimeSpan? IdleTimeout { get; set; }
-
-	[ConfigurationField( "disable_overlapped_recycle" )]
-	public bool? DisabledOverlappedRecycle { get; set; }
-
-	[ConfigurationField( "periodic_restart" )]
-	public TimeSpan? PeriodicRestart { get; set; }
-
-	[ConfigurationField( "enable_32bit_app_on_win64" )]
-	public bool? Enable32BitAppOnWin64 { get; set; }
-
-	[ConfigurationField( "service_unavailable_response" )]
-	public LoadBalancerCapabilities? ServiceUnavailableResponse { get; set; }
-
-	[ConfigurationField( "queue_length" )]
-	public long? QueueLength { get; set; }
-
-	[ConfigurationField( "start_time_limit" )]
-	public TimeSpan? StartTimeLimit { get; set; }
-
-	[ConfigurationField( "shutdown_time_limit" )]
-	public TimeSpan? ShutdownTimeLimit { get; set; }
 
 	[ConfigurationField( "enable_udp_logging" )]
 	public bool EnableUdpLogging { get; set; }
@@ -71,7 +38,11 @@ public sealed class DriverTaskConfigApplication
 
 	[ConfigurationCollectionField( "virtual_directories", "virtual_directory" )]
 	public DriverTaskConfigVirtualDirectory[]? VirtualDirectories { get; set; }
+
+	[ConfigurationCollectionField( "application_pools", "application_pool", 0, 1 )]
+	public DriverTaskConfigApplicationPool[] ApplicationPools { get; set; } = default!;
 }
+
 
 public sealed class DriverTaskConfigVirtualDirectory
 {
@@ -82,6 +53,59 @@ public sealed class DriverTaskConfigVirtualDirectory
 	[Required]
 	[ConfigurationField( "path" )]
 	public string Path { get; set; } = default!;
+}
+
+public class DriverTaskConfigApplicationPoolBase
+{
+	[ConfigurationField( "managed_pipeline_mode" )]
+	public ManagedPipelineMode? ManagedPipelineMode { get; set; }
+
+	[ConfigurationField( "managed_runtime_version" )]
+	public string? ManagedRuntimeVersion { get; set; }
+
+	[ConfigurationField( "start_mode" )]
+	public StartMode? StartMode { get; set; }
+
+	[ConfigurationField( "idle_timeout" )]
+	public TimeSpan? IdleTimeout { get; set; }
+
+	[ConfigurationField( "disable_overlapped_recycle" )]
+	public bool? DisabledOverlappedRecycle { get; set; }
+
+	[ConfigurationField( "periodic_restart" )]
+	public TimeSpan? PeriodicRestart { get; set; }
+
+	[ConfigurationField( "enable_32bit_app_on_win64" )]
+	public bool? Enable32BitAppOnWin64 { get; set; }
+
+	[ConfigurationField( "service_unavailable_response" )]
+	public LoadBalancerCapabilities? ServiceUnavailableResponse { get; set; }
+
+	[ConfigurationField( "queue_length" )]
+	public long? QueueLength { get; set; }
+
+	[ConfigurationField( "start_time_limit" )]
+	public TimeSpan? StartTimeLimit { get; set; }
+
+	[ConfigurationField( "shutdown_time_limit" )]
+	public TimeSpan? ShutdownTimeLimit { get; set; }
+}
+
+public sealed class DriverTaskConfigApplicationPool : DriverTaskConfigApplicationPoolBase
+{
+	[ConfigurationCollectionField( "env", "env" )]
+	public DriverTaskConfigEnvironmentVariable[]? EnvironmentVariables { get; set; }
+}
+
+public sealed class DriverTaskConfigEnvironmentVariable
+{
+	[Required]
+	[ConfigurationField( "key" )]
+	public string Key { get; set; } = default!;
+
+	[Required]
+	[ConfigurationField( "value" )]
+	public string Value { get; set; } = default!;
 }
 
 public sealed class DriverTaskConfigBinding

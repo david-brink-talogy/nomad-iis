@@ -10,6 +10,7 @@ using Microsoft.Web.Administration;
 using NomadIIS.Services.Configuration;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using System.IO;
 using System.IO.Compression;
 using System.IO.Pipes;
@@ -138,6 +139,8 @@ public sealed class IisTaskHandle : IDisposable
 				}
 
 				// Create applications
+				var applicationIndex = 0;
+				List<string> createdAppPools = [];
 				foreach ( var app in config.Applications.OrderBy( x => string.IsNullOrEmpty( x.Alias ) ? 0 : 1 ) )
 				{
 					var application = FindApplicationByPath( website, $"/{app.Alias}" );
@@ -146,10 +149,39 @@ public sealed class IisTaskHandle : IDisposable
 						throw new InvalidOperationException( $"An application with alias {app.Alias} already exists in website {website.Name}." );
 
 					if ( application is null )
-						CreateApplication( website, appPool, _taskConfig, app, _owner );
+					{
+						ApplicationPool? applicationAppPool = appPool;
+						var configApplicationAppPool = app.ApplicationPools.FirstOrDefault();
+						if ( configApplicationAppPool is not null )
+						{
+							// Create AppPool
+							var applicationAppPoolName = BuildAppPoolOrWebsiteName( _taskConfig, applicationIndex );
+
+							await SendTaskEventAsync( $"Preparing to create application pool: {applicationAppPoolName} for sub-application. Index ID: {applicationIndex}." );
+
+							applicationAppPool = FindApplicationPool( handle.ServerManager, applicationAppPoolName );
+							if ( applicationAppPool is null )
+							{
+								await SendTaskEventAsync( $"Creating application pool for sub-application with {task.Id}: {applicationAppPoolName}" );
+								_logger.LogInformation( $"Task {task.Id}: Creating AppPool with name {applicationAppPoolName}..." );
+
+								applicationAppPool = CreateApplicationPool( handle.ServerManager, applicationAppPoolName, configApplicationAppPool, _state.UdpLoggerPort, _owner.UdpLoggerPort );
+								createdAppPools.Add( applicationAppPoolName );
+								await SendTaskEventAsync( $"Created application pool for sub-application with {task.Id}: {applicationAppPoolName}" );
+							}
+							else
+							{
+								await SendTaskEventAsync( $"Found application pool for sub-application: {applicationAppPool.Name}" );
+							}
+						}
+						CreateApplication( website, applicationAppPool, _taskConfig, app, _owner );
+					}
+
+					applicationIndex++;
 				}
 
 				_state.ApplicationAliases = config.Applications.Select( x => x.Alias ).ToList();
+				_state.ApplicationAppPoolNames = createdAppPools;
 
 				return Task.CompletedTask;
 			} );
@@ -238,12 +270,37 @@ public sealed class IisTaskHandle : IDisposable
 
 		HashSet<string>? certificatesToUninstall = null;
 
+
 		await _owner.LockAsync( handle =>
 		{
-			var website = _state.WebsiteName is not null ? FindWebsiteByName( handle.ServerManager, _state.WebsiteName ) : null;
-			var appPool = _state.AppPoolName is not null ? FindApplicationPool( handle.ServerManager, _state.AppPoolName ) : null;
+			var appPoolNamesToClean = new List<string>();
+			if ( _state.AppPoolName is not null )
+			{
+				appPoolNamesToClean.Add(_state.AppPoolName);
+			}
 
-			if ( appPool is not null )
+			if ( _state.ApplicationAppPoolNames is not null )
+			{
+				appPoolNamesToClean.AddRange(_state.ApplicationAppPoolNames);
+			}
+
+			List<ApplicationPool> appPools = new List<ApplicationPool>();
+
+			foreach ( var appPoolName in appPoolNamesToClean )
+			{
+				var existingAppPool = FindApplicationPool( handle.ServerManager, appPoolName );
+				if ( existingAppPool is not null )
+				{
+					appPools.Add(existingAppPool);
+				}
+			}
+
+
+			var website = _state.WebsiteName is not null ? FindWebsiteByName( handle.ServerManager, _state.WebsiteName ) : null;
+			//var appPool = _state.AppPoolName is not null ? FindApplicationPool( handle.ServerManager, _state.AppPoolName ) : null;
+
+
+			foreach ( var appPool in appPools )
 			{
 				try
 				{
@@ -295,8 +352,11 @@ public sealed class IisTaskHandle : IDisposable
 				}
 			}
 
-			if ( appPool is not null )
+
+			foreach ( var appPool in appPools )
+			{
 				handle.ServerManager.ApplicationPools.Remove( appPool );
+			}
 
 			return Task.CompletedTask;
 		} );
@@ -450,10 +510,29 @@ public sealed class IisTaskHandle : IDisposable
 
 	#region IIS Helper Methods
 
-	private static string BuildAppPoolOrWebsiteName ( TaskConfig taskConfig )
+	private static string BuildAppPoolOrWebsiteName ( TaskConfig taskConfig, int? sequence = null )
 	{
-		var rawName = $"{AppPoolOrWebsiteNamePrefix}{taskConfig.AllocId}-{taskConfig.Name}";
+		var name = SanitizeName( $"{AppPoolOrWebsiteNamePrefix}{taskConfig.AllocId}-{taskConfig.Name}" );
+		var suffix = $"-{sequence}";
 
+		if ( sequence is not null )
+		{
+			name += suffix;
+		}
+
+		if ( name.Length <= 64 )
+		{
+			return name;
+		}
+
+		return sequence is null
+			? $"{AppPoolOrWebsiteNamePrefix}{taskConfig.AllocId}"
+			: $"{AppPoolOrWebsiteNamePrefix}{taskConfig.AllocId}{suffix}";
+	}
+
+
+	private static string SanitizeName(string rawName)
+	{
 		var invalidChars = ApplicationPoolCollection.InvalidApplicationPoolNameCharacters()
 			.Union( SiteCollection.InvalidSiteNameCharacters() )
 			.ToArray();
@@ -468,20 +547,74 @@ public sealed class IisTaskHandle : IDisposable
 				sb.Append( c );
 		}
 
-		var finalName = sb.ToString();
-
-		// AppPool name limit is 64 characters. Website's doesn't seem to have a limit.
-		if ( finalName.Length > 64 )
-			finalName = $"{AppPoolOrWebsiteNamePrefix}{taskConfig.AllocId}";
-
-		return finalName;
+		return sb.ToString();
 	}
+
+	//private static string BuildAppPoolName ( TaskConfig taskConfig, DriverTaskConfigApplication appConfig ) =>
+	//	SanitizeName($"{AppPoolOrWebsiteNamePrefix}{taskConfig.AllocId}-{appConfig.Path.GetHashCode()}");
 
 	private static ApplicationPool GetApplicationPool ( ServerManager serverManager, string name )
 		=> FindApplicationPool( serverManager, name ) ?? throw new KeyNotFoundException( $"No AppPool with name {name} found." );
 	private static ApplicationPool? FindApplicationPool ( ServerManager serverManager, string name )
 		=> serverManager.ApplicationPools.FirstOrDefault( x => x.Name == name );
+
 	private static ApplicationPool CreateApplicationPool ( ServerManager serverManager, string name, TaskConfig taskConfig, DriverTaskConfig config, int? udpLocalPort, int? udpRemotePort )
+	{
+		var appPool = CreateApplicationPool( serverManager, name, config );
+
+		var envVarsCollection = appPool.GetCollection( "environmentVariables" );
+
+		foreach ( var env in GetTaskConfigEnvironmentVariables( taskConfig ) )
+			AddEnvironmentVariable( envVarsCollection, env.Key, env.Value );
+
+		AddUdpLoggingEnvironmentVariables( envVarsCollection, udpLocalPort, udpRemotePort );
+
+		return appPool;
+	}
+
+	private static ApplicationPool CreateApplicationPool ( ServerManager serverManager, string name, DriverTaskConfigApplicationPool config, int? udpLocalPort, int? udpRemotePort )
+	{
+		var appPool = CreateApplicationPool( serverManager, name, config );
+
+		var envVarsCollection = appPool.GetCollection( "environmentVariables" );
+
+		if ( config.EnvironmentVariables is not null )
+		{
+			foreach ( var env in config.EnvironmentVariables )
+				AddEnvironmentVariable( envVarsCollection, env.Key, env.Value );
+		}
+
+		AddUdpLoggingEnvironmentVariables( envVarsCollection, udpLocalPort, udpRemotePort );
+
+		return appPool;
+	}
+
+	private static void AddUdpLoggingEnvironmentVariables( ConfigurationElementCollection envVarsCollection, int? udpLocalPort, int? udpRemotePort )
+	{
+		if ( udpLocalPort is null || udpRemotePort is null )
+		{
+			return;
+		}
+
+		AddEnvironmentVariable( envVarsCollection, "NOMAD_STDOUT_UDP_REMOTE_PORT", udpRemotePort.Value.ToString() );
+		AddEnvironmentVariable( envVarsCollection, "NOMAD_STDOUT_UDP_LOCAL_PORT", udpLocalPort.Value.ToString() );
+	}
+
+	private static void AddEnvironmentVariable ( ConfigurationElementCollection envVarsCollection, string key, string value )
+	{
+		if ( !string.IsNullOrEmpty( key ) && !string.IsNullOrEmpty( value ) )
+		{
+			var envVarElement = envVarsCollection.CreateElement( "add" );
+
+			envVarElement["name"] = key;
+			envVarElement["value"] = value;
+
+			envVarsCollection.Add( envVarElement );
+		}
+	}
+
+	private static ApplicationPool CreateApplicationPool(ServerManager serverManager, string name,
+		DriverTaskConfigApplicationPoolBase config)
 	{
 		var appPool = serverManager.ApplicationPools.Add( name );
 		appPool.AutoStart = true;
@@ -526,32 +659,7 @@ public sealed class IisTaskHandle : IDisposable
 			appPool.ProcessModel.StartupTimeLimit = config.StartTimeLimit.Value;
 		if ( config.ShutdownTimeLimit is not null )
 			appPool.ProcessModel.ShutdownTimeLimit = config.ShutdownTimeLimit.Value;
-
-		var envVarsCollection = appPool.GetCollection( "environmentVariables" );
-
-		foreach ( var env in GetTaskConfigEnvironmentVariables( taskConfig ) )
-			AddEnvironmentVariable( envVarsCollection, env.Key, env.Value );
-
-		if ( udpLocalPort is not null && udpRemotePort is not null )
-		{
-			AddEnvironmentVariable( envVarsCollection, "NOMAD_STDOUT_UDP_REMOTE_PORT", udpRemotePort.Value.ToString() );
-			AddEnvironmentVariable( envVarsCollection, "NOMAD_STDOUT_UDP_LOCAL_PORT", udpLocalPort.Value.ToString() );
-		}
-
 		return appPool;
-
-		void AddEnvironmentVariable ( ConfigurationElementCollection envVarsCollection, string key, string value )
-		{
-			if ( !string.IsNullOrEmpty( key ) && !string.IsNullOrEmpty( value ) )
-			{
-				var envVarElement = envVarsCollection.CreateElement( "add" );
-
-				envVarElement["name"] = key;
-				envVarElement["value"] = value;
-
-				envVarsCollection.Add( envVarElement );
-			}
-		}
 	}
 
 	private static IEnumerable<KeyValuePair<string, string>> GetTaskConfigEnvironmentVariables ( TaskConfig taskConfig )
