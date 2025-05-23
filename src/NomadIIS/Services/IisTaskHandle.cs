@@ -154,12 +154,18 @@ public sealed class IisTaskHandle : IDisposable
 							// Create AppPool
 							var applicationAppPoolName = BuildAppPoolOrWebsiteName( _taskConfig, applicationIndex );
 
+							await SendTaskEventAsync( $"Preparing to create application pool: {applicationAppPoolName} for sub-application. Index ID: {applicationIndex}." );
+
 							var applicationAppPool = FindApplicationPool( handle.ServerManager, applicationAppPoolName );
+							await SendTaskEventAsync( $"Found application pool for sub-application: {applicationAppPool.Name}" );
 							if ( applicationAppPool is null )
 							{
+								await SendTaskEventAsync( $"Creating application pool for sub-application with {task.Id}: {applicationAppPoolName}" );
 								_logger.LogInformation( $"Task {task.Id}: Creating AppPool with name {applicationAppPoolName}..." );
 
 								appPool = CreateApplicationPool( handle.ServerManager, applicationAppPoolName, configApplicationAppPool, _state.UdpLoggerPort, _owner.UdpLoggerPort );
+
+								await SendTaskEventAsync( $"Created application pool for sub-application with {task.Id}: {applicationAppPoolName}" );
 							}
 						}
 						CreateApplication( website, appPool, _taskConfig, app, _owner );
@@ -475,7 +481,7 @@ public sealed class IisTaskHandle : IDisposable
 
 		if ( sequence is not null )
 		{
-			name += $"-{sequence}";
+			name = name.Length <= 64 ? $"{name}-{sequence}" : $"{AppPoolOrWebsiteNamePrefix}{taskConfig.AllocId}-{sequence}";
 		}
 
 		name = SanitizeName( name );
