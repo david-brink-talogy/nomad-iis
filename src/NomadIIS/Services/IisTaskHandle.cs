@@ -140,6 +140,7 @@ public sealed class IisTaskHandle : IDisposable
 
 				// Create applications
 				var applicationIndex = 0;
+				List<string> createdAppPools = [];
 				foreach ( var app in config.Applications.OrderBy( x => string.IsNullOrEmpty( x.Alias ) ? 0 : 1 ) )
 				{
 					var application = FindApplicationByPath( website, $"/{app.Alias}" );
@@ -149,6 +150,7 @@ public sealed class IisTaskHandle : IDisposable
 
 					if ( application is null )
 					{
+						ApplicationPool? applicationAppPool = appPool;
 						var configApplicationAppPool = app.ApplicationPools.FirstOrDefault();
 						if ( configApplicationAppPool is not null )
 						{
@@ -157,14 +159,14 @@ public sealed class IisTaskHandle : IDisposable
 
 							await SendTaskEventAsync( $"Preparing to create application pool: {applicationAppPoolName} for sub-application. Index ID: {applicationIndex}." );
 
-							var applicationAppPool = FindApplicationPool( handle.ServerManager, applicationAppPoolName );
+							applicationAppPool = FindApplicationPool( handle.ServerManager, applicationAppPoolName );
 							if ( applicationAppPool is null )
 							{
 								await SendTaskEventAsync( $"Creating application pool for sub-application with {task.Id}: {applicationAppPoolName}" );
 								_logger.LogInformation( $"Task {task.Id}: Creating AppPool with name {applicationAppPoolName}..." );
 
-								appPool = CreateApplicationPool( handle.ServerManager, applicationAppPoolName, configApplicationAppPool, _state.UdpLoggerPort, _owner.UdpLoggerPort );
-
+								applicationAppPool = CreateApplicationPool( handle.ServerManager, applicationAppPoolName, configApplicationAppPool, _state.UdpLoggerPort, _owner.UdpLoggerPort );
+								createdAppPools.Add( applicationAppPoolName );
 								await SendTaskEventAsync( $"Created application pool for sub-application with {task.Id}: {applicationAppPoolName}" );
 							}
 							else
@@ -172,13 +174,14 @@ public sealed class IisTaskHandle : IDisposable
 								await SendTaskEventAsync( $"Found application pool for sub-application: {applicationAppPool.Name}" );
 							}
 						}
-						CreateApplication( website, appPool, _taskConfig, app, _owner );
+						CreateApplication( website, applicationAppPool, _taskConfig, app, _owner );
 					}
 
 					applicationIndex++;
 				}
 
 				_state.ApplicationAliases = config.Applications.Select( x => x.Alias ).ToList();
+				_state.ApplicationAppPoolNames = createdAppPools;
 
 				return Task.CompletedTask;
 			} );
@@ -267,12 +270,37 @@ public sealed class IisTaskHandle : IDisposable
 
 		HashSet<string>? certificatesToUninstall = null;
 
+
 		await _owner.LockAsync( handle =>
 		{
-			var website = _state.WebsiteName is not null ? FindWebsiteByName( handle.ServerManager, _state.WebsiteName ) : null;
-			var appPool = _state.AppPoolName is not null ? FindApplicationPool( handle.ServerManager, _state.AppPoolName ) : null;
+			var appPoolNamesToClean = new List<string>();
+			if ( _state.AppPoolName is not null )
+			{
+				appPoolNamesToClean.Add(_state.AppPoolName);
+			}
 
-			if ( appPool is not null )
+			if ( _state.ApplicationAppPoolNames is not null )
+			{
+				appPoolNamesToClean.AddRange(_state.ApplicationAppPoolNames);
+			}
+
+			List<ApplicationPool> appPools = new List<ApplicationPool>();
+
+			foreach ( var appPoolName in appPoolNamesToClean )
+			{
+				var existingAppPool = FindApplicationPool( handle.ServerManager, appPoolName );
+				if ( existingAppPool is not null )
+				{
+					appPools.Add(existingAppPool);
+				}
+			}
+
+
+			var website = _state.WebsiteName is not null ? FindWebsiteByName( handle.ServerManager, _state.WebsiteName ) : null;
+			//var appPool = _state.AppPoolName is not null ? FindApplicationPool( handle.ServerManager, _state.AppPoolName ) : null;
+
+
+			foreach ( var appPool in appPools )
 			{
 				try
 				{
@@ -324,8 +352,11 @@ public sealed class IisTaskHandle : IDisposable
 				}
 			}
 
-			if ( appPool is not null )
+
+			foreach ( var appPool in appPools )
+			{
 				handle.ServerManager.ApplicationPools.Remove( appPool );
+			}
 
 			return Task.CompletedTask;
 		} );
@@ -494,7 +525,7 @@ public sealed class IisTaskHandle : IDisposable
 			return name;
 		}
 
-		return sequence is not null
+		return sequence is null
 			? $"{AppPoolOrWebsiteNamePrefix}{taskConfig.AllocId}"
 			: $"{AppPoolOrWebsiteNamePrefix}{taskConfig.AllocId}{suffix}";
 	}
